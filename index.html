@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSV Diff Visual • One‑File</title>
+  <meta name="description" content="Compare dois arquivos CSV, veja adicionados/removidos/alterados e exporte um relatório — tudo em um único HTML." />
+  <style>
+    :root{ --bg:#0b0c0f; --panel:#141720; --soft:#1b2030; --text:#eef1f5; --muted:#a9b2c3; --accent:#6ee7ff; --ring:#2a3348; --good:#10b981; --bad:#ef4444; --warn:#f59e0b }
+    @media (prefers-color-scheme: light) {
+      :root{ --bg:#f5f7fb; --panel:#ffffff; --soft:#eef2f9; --text:#0b1220; --muted:#5b6475; --accent:#006dff; --ring:#cfd8ea; --good:#059669; --bad:#dc2626; --warn:#d97706}
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1200px 800px at 10% -10%, rgba(110,231,255,.08), transparent 60%),
+           radial-gradient(800px 600px at 100% 0%, rgba(0,109,255,.08), transparent 60%), var(--bg); color:var(--text);
+         font:500 16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial,"Noto Sans","Apple Color Emoji","Segoe UI Emoji"}
+    a{color:inherit}
+    header{position:sticky;top:0;backdrop-filter:saturate(1.2) blur(6px);background:color-mix(in oklab,var(--bg) 80%, transparent); z-index:5}
+    .wrap{max-width:1100px;margin-inline:auto;padding:20px}
+    .hero{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .title{font-size:clamp(22px,4vw,30px);font-weight:800;letter-spacing:.2px}
+    .subtitle{color:var(--muted)}
+
+    .panel{background:linear-gradient(180deg,var(--panel),color-mix(in oklab,var(--panel) 70%,#000 30%));border:1px solid var(--ring);border-radius:18px;padding:16px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+    .field{display:flex;flex-direction:column;gap:6px}
+    .label{font-size:14px;color:var(--muted)}
+    input[type="file"], select, button{padding:12px 14px;border-radius:12px;border:1px solid var(--ring);background:var(--panel);color:var(--text);outline:none}
+    button{cursor:pointer}
+    button.primary{background:color-mix(in oklab,var(--accent) 15%, var(--panel) 85%)}
+
+    .stats{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}
+    .stat{padding:8px 12px;border-radius:999px;border:1px solid var(--ring);background:var(--soft)}
+
+    .tabs{display:flex;gap:8px;margin:16px 0}
+    .tab{padding:8px 12px;border-radius:999px;border:1px solid var(--ring);background:var(--panel);cursor:pointer}
+    .tab[data-active="true"]{outline:2px solid color-mix(in oklab, var(--accent) 60%, transparent)}
+
+    table{width:100%;border-collapse:separate;border-spacing:0;margin-top:10px}
+    th,td{padding:10px;border-bottom:1px dashed var(--ring);vertical-align:top}
+    th{position:sticky;top:64px;background:color-mix(in oklab,var(--panel) 92%, transparent);text-align:left}
+
+    .row-add{background:color-mix(in oklab, var(--good) 12%, transparent)}
+    .row-del{background:color-mix(in oklab, var(--bad) 10%, transparent)}
+    .chg{outline:2px solid color-mix(in oklab, var(--warn) 60%, transparent)}
+    .hint{color:var(--muted);font-size:14px}
+    .warn{color:var(--warn)}
+    .sr-only{position:absolute;width:1px;height:1px;margin:-1px;border:0;padding:0;clip:rect(0 0 0 0);overflow:hidden}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <div>
+        <div class="title">CSV Diff Visual • One‑File</div>
+        <div class="subtitle">Compare dois CSVs no navegador. Nada é enviado para a internet.</div>
+      </div>
+      <div>
+        <a class="tab" href="#como-publicar">Como publicar</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <div class="grid">
+        <label class="field">
+          <span class="label">CSV antigo (A)</span>
+          <input id="fileA" type="file" accept=".csv,text/csv" />
+        </label>
+        <label class="field">
+          <span class="label">CSV novo (B)</span>
+          <input id="fileB" type="file" accept=".csv,text/csv" />
+        </label>
+        <label class="field">
+          <span class="label">Coluna‑chave (ID/Primary Key)</span>
+          <select id="keyCol"><option value="">(carregue os arquivos)</option></select>
+        </label>
+        <div class="field" style="justify-content:flex-end">
+          <button id="btnCompare" class="primary" disabled>Comparar</button>
+        </div>
+      </div>
+      <div id="dupWarn" class="hint" hidden></div>
+    </section>
+
+    <section id="summary" class="panel" style="margin-top:16px" hidden>
+      <div class="stats">
+        <div class="stat" id="statTotal">Total linhas (A/B): –</div>
+        <div class="stat" id="statAdd">Adicionados: –</div>
+        <div class="stat" id="statDel">Removidos: –</div>
+        <div class="stat" id="statChg">Alterados: –</div>
+      </div>
+      <div class="hint">Dica: clique nas abas abaixo. Passe o mouse sobre células destacadas para ver o valor antigo.</div>
+      <div style="margin-top:12px"><button id="btnExport">Exportar relatório (.csv)</button></div>
+    </section>
+
+    <nav class="tabs" id="tabs" hidden>
+      <button class="tab" data-tab="added" data-active="true">Adicionados</button>
+      <button class="tab" data-tab="removed">Removidos</button>
+      <button class="tab" data-tab="changed">Alterados</button>
+    </nav>
+
+    <section id="view" class="panel" hidden>
+      <div id="tableWrap"></div>
+    </section>
+
+    <hr style="margin:40px 0;border:0;border-top:1px dashed var(--ring)" />
+
+    <section id="como-publicar" class="panel">
+      <h2>Como publicar (GitHub Pages – 3 passos)</h2>
+      <ol>
+        <li>Crie um repositório no GitHub (ex.: <strong>csv-diff-visual</strong>).</li>
+        <li>Coloque este arquivo <code>index.html</code> na raiz e faça commit.</li>
+        <li>Em <strong>Settings → Pages</strong>, selecione <em>Deploy from a branch</em>, branch <strong>main</strong>, pasta <strong>/root</strong>. Pronto, você ganha uma URL pública.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script>
+  // --- Pequeno parser CSV (suporta vírgula, quebra de linha e aspas duplas) ---
+  function parseCSV(text) {
+    const rows = []
+    let i=0, field='', row=[], inQuotes=false
+    while (i < text.length) {
+      const c = text[i]
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i+1] === '"') { field+='"'; i+=2; continue } // escape ""
+          inQuotes = false; i++; continue
+        } else { field += c; i++; continue }
+      } else {
+        if (c === '"') { inQuotes = true; i++; continue }
+        if (c === ',') { row.push(field); field=''; i++; continue }
+        if (c === '\n') { row.push(field); rows.push(row); field=''; row=[]; i++; continue }
+        if (c === '\r') { // CRLF
+          if (text[i+1] === '\n') { i++; }
+          row.push(field); rows.push(row); field=''; row=[]; i++; continue
+        }
+        field += c; i++
+      }
+    }
+    // flush
+    if (field!=='' || row.length) { row.push(field); rows.push(row) }
+    // trim trailing empty lines
+    while (rows.length && rows[rows.length-1].every(v=>v==='')) rows.pop()
+    const headers = rows.shift() || []
+    const data = rows.map(r=> Object.fromEntries(headers.map((h,idx)=>[h, r[idx]??''])))
+    return { headers, rows: data }
+  }
+
+  function readFile(file){
+    return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onerror=()=>rej(fr.error); fr.onload=()=>res(fr.result); fr.readAsText(file) })
+  }
+
+  function toMap(rows, key){
+    const map = new Map(); const dups = new Set()
+    for (const r of rows){
+      const k = (r[key]??'').toString()
+      if (map.has(k)) dups.add(k); else map.set(k, r)
+    }
+    return { map, dups }
+  }
+
+  function diffRows(Amap, Bmap, headers, key){
+    const added=[], removed=[], changed=[]
+    const allKeys = new Set([...Amap.keys(), ...Bmap.keys()])
+    for (const k of allKeys){
+      const a = Amap.get(k), b = Bmap.get(k)
+      if (a && !b) { removed.push(a); continue }
+      if (!a && b) { added.push(b); continue }
+      if (a && b){
+        const chCols=[]
+        for (const h of headers){ if (h===key) continue; if ((a[h]??'') !== (b[h]??'')) chCols.push(h) }
+        if (chCols.length){ changed.push({key:k, before:a, after:b, cols:chCols}) }
+      }
+    }
+    return { added, removed, changed }
+  }
+
+  function el(tag, attrs={}, ...children){
+    const e=document.createElement(tag)
+    for (const [k,v] of Object.entries(attrs)){
+      if (k==='class') e.className=v; else if (k==='html') e.innerHTML=v; else e.setAttribute(k,v)
+    }
+    for (const c of children){ if (c==null) continue; e.appendChild(typeof c==='string'? document.createTextNode(c) : c) }
+    return e
+  }
+
+  const ui = {
+    fileA: document.getElementById('fileA'),
+    fileB: document.getElementById('fileB'),
+    keyCol: document.getElementById('keyCol'),
+    btnCompare: document.getElementById('btnCompare'),
+    dupWarn: document.getElementById('dupWarn'),
+    summary: document.getElementById('summary'),
+    statTotal: document.getElementById('statTotal'),
+    statAdd: document.getElementById('statAdd'),
+    statDel: document.getElementById('statDel'),
+    statChg: document.getElementById('statChg'),
+    tabs: document.getElementById('tabs'),
+    view: document.getElementById('view'),
+    tableWrap: document.getElementById('tableWrap'),
+    btnExport: document.getElementById('btnExport')
+  }
+
+  const state = { A:null, B:null, headers:[], key:null, dupsA:new Set(), dupsB:new Set(), diff:null }
+
+  async function tryEnable(){
+    if (ui.fileA.files[0] && ui.fileB.files[0]){
+      const [aTxt, bTxt] = await Promise.all([readFile(ui.fileA.files[0]), readFile(ui.fileB.files[0])])
+      const A = parseCSV(aTxt), B = parseCSV(bTxt)
+      state.A = A.rows; state.B = B.rows
+      // headers pela intersecção (ou do B se vazio)
+      const headers = (A.headers.length? A.headers : Object.keys(A.rows[0]||{}))
+        .filter(h=> (B.headers.length? B.headers : Object.keys(B.rows[0]||{})).includes(h))
+      state.headers = headers
+      // popular select de key
+      ui.keyCol.innerHTML = ''
+      if (!headers.length){ ui.keyCol.innerHTML = '<option>(sem cabeçalhos compatíveis)</option>'; ui.btnCompare.disabled=true; return }
+      for (const h of headers){ const opt=el('option', {value:h}); opt.textContent=h; ui.keyCol.appendChild(opt) }
+      const defaultKey = headers.includes('id')? 'id' : headers[0]
+      ui.keyCol.value = defaultKey
+      state.key = defaultKey
+      ui.btnCompare.disabled=false
+      ui.dupWarn.hidden = true
+    }
+  }
+
+  function renderTableAdded(rows, headers){
+    const t=el('table')
+    const thead=el('thead'); const tr=el('tr'); headers.forEach(h=>tr.appendChild(el('th',{},h))); thead.appendChild(tr)
+    const tb=el('tbody'); rows.forEach(r=>{ const tr=el('tr',{class:'row-add'}); headers.forEach(h=>tr.appendChild(el('td',{}, r[h]||''))); tb.appendChild(tr) })
+    t.append(thead,tb); return t
+  }
+
+  function renderTableRemoved(rows, headers){
+    const t=el('table')
+    const thead=el('thead'); const tr=el('tr'); headers.forEach(h=>tr.appendChild(el('th',{},h))); thead.appendChild(tr)
+    const tb=el('tbody'); rows.forEach(r=>{ const tr=el('tr',{class:'row-del'}); headers.forEach(h=>tr.appendChild(el('td',{}, r[h]||''))); tb.appendChild(tr) })
+    t.append(thead,tb); return t
+  }
+
+  function renderTableChanged(changed, headers, key){
+    const t=el('table'); const thead=el('thead'); const trh=el('tr'); headers.forEach(h=>trh.appendChild(el('th',{},h))); thead.appendChild(trh); const tb=el('tbody')
+    for (const ch of changed){
+      const tr=el('tr');
+      for (const h of headers){
+        const v = ch.after[h]||''; const td=el('td')
+        if (h===key){ td.textContent = ch.key }
+        else if (ch.cols.includes(h)){
+          td.className='chg'; td.title = `Antes: ${ch.before[h]||''}`; td.textContent = v
+        } else { td.textContent = v }
+        tr.appendChild(td)
+      }
+      tb.appendChild(tr)
+    }
+    t.append(thead,tb); return t
+  }
+
+  function exportReport(diff, headers, key){
+    const lines=[]; const esc=v=> '"'+String(v??'').replace(/"/g,'""')+'"'
+    lines.push(['tipo','chave', 'coluna','valor_antigo','valor_novo'].map(esc).join(','))
+    for (const r of diff.added){ for (const h of headers){ if (h===key) continue; lines.push([ 'adicionado', r[key], h, '', r[h]||'' ].map(esc).join(',')) } }
+    for (const r of diff.removed){ for (const h of headers){ if (h===key) continue; lines.push([ 'removido', r[key], h, r[h]||'', '' ].map(esc).join(',')) } }
+    for (const ch of diff.changed){ for (const h of ch.cols){ lines.push([ 'alterado', ch.key, h, ch.before[h]||'', ch.after[h]||'' ].map(esc).join(',')) } }
+    const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'})
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`csv-diff-relatorio-${Date.now()}.csv`; a.click(); URL.revokeObjectURL(a.href)
+  }
+
+  function compare(){
+    const key = ui.keyCol.value; state.key = key
+    const {map:mapA, dups:dupsA} = toMap(state.A, key)
+    const {map:mapB, dups:dupsB} = toMap(state.B, key)
+    state.dupsA = dupsA; state.dupsB = dupsB
+    const diff = diffRows(mapA, mapB, state.headers, key); state.diff = diff
+
+    // avisos de duplicidade
+    const msgs=[]
+    if (dupsA.size) msgs.push(`Atenção: ${dupsA.size} chave(s) duplicada(s) em A → ${[...dupsA].slice(0,5).join(', ')}${dupsA.size>5?'…':''}`)
+    if (dupsB.size) msgs.push(`Atenção: ${dupsB.size} chave(s) duplicada(s) em B → ${[...dupsB].slice(0,5).join(', ')}${dupsB.size>5?'…':''}`)
+    ui.dupWarn.innerHTML = msgs.map(m=>`<span class="warn">${m}</span>`).join('<br>')
+    ui.dupWarn.hidden = !msgs.length
+
+    ui.summary.hidden=false
+    ui.statTotal.textContent = `Total linhas (A/B): ${state.A.length} / ${state.B.length}`
+    ui.statAdd.textContent = `Adicionados: ${diff.added.length}`
+    ui.statDel.textContent = `Removidos: ${diff.removed.length}`
+    ui.statChg.textContent = `Alterados: ${diff.changed.length}`
+
+    ui.tabs.hidden=false; ui.view.hidden=false
+    // render inicial: alterados se houver, senão adicionados, senão removidos
+    const initial = diff.changed.length? 'changed' : (diff.added.length? 'added' : 'removed')
+    $(`.tab[data-tab="${initial}"]`).click()
+  }
+
+  function showTab(name){
+    $$('.tab').forEach(b=> b.dataset.active = (b.dataset.tab===name))
+    ui.tableWrap.innerHTML=''
+    if (name==='added') ui.tableWrap.appendChild(renderTableAdded(state.diff.added, state.headers))
+    if (name==='removed') ui.tableWrap.appendChild(renderTableRemoved(state.diff.removed, state.headers))
+    if (name==='changed') ui.tableWrap.appendChild(renderTableChanged(state.diff.changed, state.headers, state.key))
+  }
+
+  // events
+  ui.fileA.addEventListener('change', tryEnable)
+  ui.fileB.addEventListener('change', tryEnable)
+  ui.keyCol.addEventListener('change', ()=>{ if (state.A && state.B) compare() })
+  ui.btnCompare.addEventListener('click', compare)
+  ui.btnExport.addEventListener('click', ()=> exportReport(state.diff, state.headers, state.key))
+  document.getElementById('tabs').addEventListener('click', e=>{ const b=e.target.closest('.tab'); if (!b) return; showTab(b.dataset.tab) })
+  </script>
+</body>
+</html>
