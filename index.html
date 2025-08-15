@@ -118,6 +118,9 @@
   </main>
 
   <script>
+  // --- Utilitários mínimos ---
+  const $ = (q,el=document)=> el.querySelector(q);
+
   // --- Pequeno parser CSV (suporta vírgula, quebra de linha e aspas duplas) ---
   function parseCSV(text) {
     const rows = []
@@ -291,11 +294,11 @@
     ui.tabs.hidden=false; ui.view.hidden=false
     // render inicial: alterados se houver, senão adicionados, senão removidos
     const initial = diff.changed.length? 'changed' : (diff.added.length? 'added' : 'removed')
-    $(`.tab[data-tab="${initial}"]`).click()
+    showTab(initial) // <— FIX: sem depender de helper $
   }
 
   function showTab(name){
-    $$('.tab').forEach(b=> b.dataset.active = (b.dataset.tab===name))
+    document.querySelectorAll('.tab').forEach(b=> b.dataset.active = (b.dataset.tab===name))
     ui.tableWrap.innerHTML=''
     if (name==='added') ui.tableWrap.appendChild(renderTableAdded(state.diff.added, state.headers))
     if (name==='removed') ui.tableWrap.appendChild(renderTableRemoved(state.diff.removed, state.headers))
@@ -307,7 +310,6 @@
   ui.fileB.addEventListener('change', tryEnable)
   ui.keyCol.addEventListener('change', ()=>{ if (state.A && state.B) compare() })
   ui.btnCompare.addEventListener('click', compare)
-  ui.btnExport.addEventListener('click', ()=> exportReport(state.diff, state.headers, state.key))
   document.getElementById('tabs').addEventListener('click', e=>{ const b=e.target.closest('.tab'); if (!b) return; showTab(b.dataset.tab) })
   </script>
 </body>
